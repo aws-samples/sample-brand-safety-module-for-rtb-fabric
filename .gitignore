@@ -1,0 +1,29 @@
+# Gradle / JVM
+.gradle/
+build/
+/build
+*.jar
+# ...but the Gradle wrapper jar MUST be committed for ./gradlew to work
+!**/gradle/wrapper/gradle-wrapper.jar
+
+# CDK / Node
+node_modules/
+cdk.out/
+*.js
+*.d.ts
+
+# Local run output
+output/
+
+# Kotlin compiler scratch
+.kotlin/
+
+# OS
+.DS_Store
+
+# Security scan output
+*-report/
+*-output.json
+
+# Local security-review working notes (internal, never published)
+review-notes/

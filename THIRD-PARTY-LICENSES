@@ -1,0 +1,20 @@
+This project depends on the following third-party components. Their licenses are
+listed below. This file is informational; each dependency is fetched from public
+package repositories (Maven Central, npm) at build time and is not redistributed in
+source form within this repository.
+
+## Kotlin / JVM (module/, fetched from Maven Central)
+
+- org.jetbrains.kotlin:kotlin-stdlib .......... Apache-2.0
+- com.amazonaws:aws-lambda-java-core .......... Apache-2.0
+- software.amazon.awssdk:s3 (and BOM) ......... Apache-2.0
+- org.junit.jupiter:junit-jupiter (test) ...... EPL-2.0
+- org.junit.platform:junit-platform-launcher .. EPL-2.0
+
+## Infrastructure
+
+Infrastructure is deployed via a plain CloudFormation template
+(infra-cfn/brand-safety-module.yaml) — no CDK/Node/npm dependencies.
+
+All listed licenses are OSI-approved and permit redistribution. Verify versions
+against the build file (module/build.gradle.kts) before release.

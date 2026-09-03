@@ -1,0 +1,8 @@
+[
+  {
+    "name": "brand-safety",
+    "moduleParameters": {
+      "__comment": "Placeholder module-flow entry for UpdateLinkModuleFlow. The exact fields for referencing a custom module depend on the public module-authoring API; confirm the shape against the RTB Fabric SDK before use. Built-in module parameters (e.g. rateLimiter, openRtbAttribute) follow the public rtbfabric model."
+    }
+  }
+]
