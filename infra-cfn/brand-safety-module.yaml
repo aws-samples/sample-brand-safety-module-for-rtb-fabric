@@ -1,0 +1,216 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Brand Safety Express Module for RTB Fabric — ISV-side infrastructure.
+  Provisions an S3 bucket, a classifier Lambda, its least-privilege IAM role,
+  and an hourly EventBridge schedule that refreshes the lookup table.
+
+Parameters:
+  LambdaCodeBucket:
+    Type: String
+    Description: >-
+      Name of an existing S3 bucket that holds the classifier Lambda deployment
+      package (the fat JAR). You upload the JAR there before deploying this stack.
+  LambdaCodeKey:
+    Type: String
+    Default: reference-express-module-all.jar
+    Description: S3 object key of the uploaded Lambda deployment package (JAR).
+  LambdaCodeVersion:
+    Type: String
+    Default: ""
+    Description: >-
+      Optional S3 object version of the Lambda deployment package. The classifier code
+      lives in this deployer-managed code bucket, not in the stack, so whoever can write
+      that object controls the code the function runs. Keep the code bucket
+      access-restricted and versioned, and pin this to a specific object version so the
+      code cannot be swapped without a stack change. Leave blank to use the latest version.
+  RtbFabricHydratorPrincipal:
+    Type: String
+    Default: ""
+    # Empty (skip the grant) or a specific IAM role ARN. Only a role is allowed — an
+    # account-root ARN would grant read access to every principal in that account, and
+    # this grant is meant for the single hydrator role. The partition is left flexible
+    # so aws / aws-cn / aws-us-gov ARNs are all accepted.
+    AllowedPattern: "^$|^arn:aws[a-z-]*:iam::[0-9]{12}:role/.+$"
+    ConstraintDescription: >-
+      Must be empty or a specific IAM role ARN
+      (arn:aws:iam::<account>:role/<name>). Account-root ARNs are not accepted.
+    Description: >-
+      Optional. The IAM role ARN that RTB Fabric's hydrator uses to read the output
+      lookup table. Leave blank to skip the cross-account read grant.
+
+Conditions:
+  HasHydratorPrincipal: !Not [!Equals [!Ref RtbFabricHydratorPrincipal, ""]]
+  HasCodeVersion: !Not [!Equals [!Ref LambdaCodeVersion, ""]]
+
+Resources:
+  # Dedicated bucket that receives S3 server access logs for the data bucket.
+  AccessLogsBucket:
+    Type: AWS::S3::Bucket
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerPreferred
+      VersioningConfiguration:
+        Status: Enabled
+
+  AccessLogsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AccessLogsBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # Enforce TLS.
+          - Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt AccessLogsBucket.Arn
+              - !Sub "${AccessLogsBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+          # Allow the S3 logging service to write access logs for the data bucket.
+          - Effect: Allow
+            Principal:
+              Service: logging.s3.amazonaws.com
+            Action: "s3:PutObject"
+            Resource: !Sub "${AccessLogsBucket.Arn}/data-bucket-logs/*"
+            Condition:
+              ArnLike:
+                aws:SourceArn: !GetAtt LookupDataBucket.Arn
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+
+  LookupDataBucket:
+    Type: AWS::S3::Bucket
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      LoggingConfiguration:
+        DestinationBucketName: !Ref AccessLogsBucket
+        LogFilePrefix: data-bucket-logs/
+
+  LookupDataBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref LookupDataBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # Enforce TLS for all access to the bucket.
+          - Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt LookupDataBucket.Arn
+              - !Sub "${LookupDataBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+          # Optional: allow the RTB Fabric hydrator read-only access to the output object.
+          - !If
+            - HasHydratorPrincipal
+            - Effect: Allow
+              Principal:
+                AWS: !Ref RtbFabricHydratorPrincipal
+              Action: "s3:GetObject"
+              Resource: !Sub "${LookupDataBucket.Arn}/classifications.csv"
+            - !Ref AWS::NoValue
+
+  ClassifierFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Policies:
+        - PolicyName: LookupDataBucketAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Read only the two input objects the classifier consumes.
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource:
+                  - !Sub "${LookupDataBucket.Arn}/domains.tsv"
+                  - !Sub "${LookupDataBucket.Arn}/default.toml"
+              # Write only the single output object the classifier produces, so the
+              # function cannot overwrite its own trusted inputs.
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub "${LookupDataBucket.Arn}/classifications.csv"
+
+  ClassifierFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: java17
+      Handler: com.example.brandsafety.LambdaHandler
+      MemorySize: 512
+      Timeout: 120
+      # One scheduled invocation per hour; cap concurrency to bound cost and blast radius.
+      ReservedConcurrentExecutions: 1
+      Role: !GetAtt ClassifierFunctionRole.Arn
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref LambdaCodeKey
+        S3ObjectVersion: !If [HasCodeVersion, !Ref LambdaCodeVersion, !Ref "AWS::NoValue"]
+      Environment:
+        Variables:
+          DATA_BUCKET: !Ref LookupDataBucket
+          DOMAINS_KEY: domains.tsv
+          CONFIG_KEY: default.toml
+          OUTPUT_KEY: classifications.csv
+
+  RefreshSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      ScheduleExpression: rate(1 hour)
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt ClassifierFunction.Arn
+          Id: ClassifierTarget
+
+  RefreshSchedulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt ClassifierFunction.Arn
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt RefreshSchedule.Arn
+
+Outputs:
+  DataBucketName:
+    Description: S3 bucket holding the input dataset, config, and output lookup table.
+    Value: !Ref LookupDataBucket
+  ClassifierFunctionName:
+    Description: The classifier Lambda function name.
+    Value: !Ref ClassifierFunction

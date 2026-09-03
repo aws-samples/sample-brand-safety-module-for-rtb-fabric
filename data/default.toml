@@ -1,0 +1,20 @@
+[classification]
+# GARM-aligned Sensitive Topics from IAB Content Taxonomy 3.0.
+# A domain carrying any of these categories is dropped.
+# NOTE: matching is EXACT set-membership. Listing a parent category (e.g. Sensitive
+# Topics) does NOT auto-block its child categories in the IAB taxonomy tree — every
+# category ID you want blocked must be listed explicitly below.
+blocked_categories = [
+    "v9i3On",   # Sensitive Topics (parent; see NOTE — does not cover children implicitly)
+    "Rm3SiT",   # Adult & Explicit Sexual Content
+    "avbNf2",   # Arms & Ammunition
+    "XtODT3",   # Crime & Harmful Acts to Individuals, Society & Human Right Violations
+    "I4GWl6",   # Death, Injury, or Military Conflict
+    "Z7rJBM",   # Debated Sensitive Social Issues
+    "HxqYV1",   # Hate Speech & Acts of Aggression
+    "pg0WhF",   # Illegal Drugs, Tobacco, eCigarettes, Vaping, Alcohol
+    "j9PaO9",   # Obscenity and Profanity
+    "mm3UXx",   # Online Piracy
+    "6i4dB6",   # Spam or Harmful Content
+    "8FD8nI",   # Terrorism
+]
